@@ -846,6 +846,11 @@ impl Extension {
             #[cfg(feature = "extensions-draft")]
             Extension::AppDataDictionary(_) => ExtensionType::AppDataDictionary,
             Extension::LastResort(_) => ExtensionType::LastResort,
+            // A GREASE value must classify the same way as in a capabilities
+            // list, which decodes it as `ExtensionType::Grease`.
+            Extension::Unknown(kind, _) if crate::grease::is_grease_value(*kind) => {
+                ExtensionType::Grease(*kind)
+            }
             Extension::Unknown(kind, _) => ExtensionType::Unknown(*kind),
         }
     }
