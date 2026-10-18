@@ -840,13 +840,13 @@ impl PublicGroup {
 
     /// Validate a leaf node.
     ///
-    /// This always validates the lifetime.
+    /// The lifetime is checked according to the group's
+    /// [`LeafNodeLifetimePolicy`] (`Verify` unless set otherwise).
     pub(crate) fn validate_leaf_node(
         &self,
         leaf_node: &crate::treesync::LeafNode,
     ) -> Result<(), LeafNodeValidationError> {
-        // Call the validation function and validate the lifetime
-        self.validate_leaf_node_inner(leaf_node, LeafNodeLifetimePolicy::Verify)
+        self.validate_leaf_node_inner(leaf_node, self.leaf_node_lifetime_policy)
     }
 
     /// Validate a leaf node.

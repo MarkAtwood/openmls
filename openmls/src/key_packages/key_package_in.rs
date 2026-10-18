@@ -138,6 +138,24 @@ impl KeyPackageIn {
         crypto: &impl OpenMlsCrypto,
         protocol_version: ProtocolVersion,
     ) -> Result<KeyPackage, KeyPackageVerifyError> {
+        self.validate_with_lifetime_policy(
+            crypto,
+            protocol_version,
+            crate::group::LeafNodeLifetimePolicy::Verify,
+        )
+    }
+
+    /// Like [`KeyPackageIn::validate`], but checks the leaf node lifetime only
+    /// if `lifetime_policy` is [`LeafNodeLifetimePolicy::Verify`]. The
+    /// lifetime extension must be present either way.
+    ///
+    /// [`LeafNodeLifetimePolicy::Verify`]: crate::group::LeafNodeLifetimePolicy::Verify
+    pub(crate) fn validate_with_lifetime_policy(
+        self,
+        crypto: &impl OpenMlsCrypto,
+        protocol_version: ProtocolVersion,
+        lifetime_policy: crate::group::LeafNodeLifetimePolicy,
+    ) -> Result<KeyPackage, KeyPackageVerifyError> {
         // We first need to verify the LeafNode inside the KeyPackage
         let leaf_node = self.payload.leaf_node.clone().into_verifiable_leaf_node();
 
@@ -193,7 +211,9 @@ impl KeyPackageIn {
 
         // Ensure validity of the life time extension in the leaf node.
         if let Some(life_time) = key_package.payload.leaf_node.life_time() {
-            life_time.validate()?;
+            if lifetime_policy == crate::group::LeafNodeLifetimePolicy::Verify {
+                life_time.validate()?;
+            }
         } else {
             // This assumes that we only verify key packages with leaf nodes
             // that were created for the key package.

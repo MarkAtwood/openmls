@@ -852,8 +852,12 @@ impl MlsGroup {
         //  - ValSem246 (as part of ValSem010)
         //  - https://validation.openmls.tech/#valn1302
         //  - https://validation.openmls.tech/#valn1304
-        let verified =
-            unverified_message.verify(self.ciphersuite(), provider.crypto(), self.version())?;
+        let verified = unverified_message.verify(
+            self.ciphersuite(),
+            provider.crypto(),
+            self.version(),
+            self.public_group.leaf_node_lifetime_policy(),
+        )?;
 
         let processed = self.process_verified_message(provider, verified)?;
 

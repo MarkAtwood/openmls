@@ -6,13 +6,16 @@ use crate::{
     },
     group::{
         mls_group::tests_and_kats::utils::setup_client, proposal_store::ProposalStore, GroupId,
-        MlsGroup, MlsGroupCreateConfig, StagedCommit, PURE_PLAINTEXT_WIRE_FORMAT_POLICY,
+        LeafNodeLifetimePolicy, MlsGroup, MlsGroupCreateConfig, PublicProcessMessageError,
+        StagedCommit, ValidationError, PURE_PLAINTEXT_WIRE_FORMAT_POLICY,
     },
+    key_packages::{errors::KeyPackageVerifyError, KeyPackage, Lifetime},
     messages::proposals::Proposal,
     test_utils::single_group_test_framework::{AddMemberConfig, CorePartyState, GroupState},
+    treesync::errors::{LeafNodeValidationError, LifetimeError},
 };
 
-use super::{super::mls_group::StagedWelcome, PublicGroup};
+use super::{super::mls_group::StagedWelcome, errors::CreationFromExternalError, PublicGroup};
 
 #[openmls_test::openmls_test]
 fn public_group() {
@@ -614,4 +617,170 @@ fn external_join_with_nested_unmerged_leaves() {
         intermediate_nodes > 0,
         "the tree has no non-blank intermediate node between an unmerged leaf and its parent"
     );
+}
+
+/// RFC 9420 §7.3 makes lifetime verification only RECOMMENDED for received
+/// leaf nodes. A [`PublicGroup`] built with [`LeafNodeLifetimePolicy::Skip`]
+/// must accept a ratchet tree whose leaf lifetime has expired, while
+/// [`PublicGroup::from_external`] must keep rejecting it.
+#[openmls_test::openmls_test]
+fn from_external_lifetime_policy() {
+    // Hold the global lifetime-check handle so no concurrent test disables
+    // the check while this test expects it to be enforced.
+    let _lifetime_check = crate::skip_validation::checks::leaf_node_lifetime::handle();
+
+    let alice_provider = &Provider::default();
+    let public_provider = &Provider::default();
+
+    let (alice_credential_with_key, _alice_kpb, alice_signer, _alice_pk) =
+        setup_client("Alice", ciphersuite, alice_provider);
+
+    // Alice's own leaf carries a lifetime that ended in 1970.
+    let mls_group_create_config = MlsGroupCreateConfig::builder()
+        .wire_format_policy(PURE_PLAINTEXT_WIRE_FORMAT_POLICY)
+        .ciphersuite(ciphersuite)
+        .lifetime(Lifetime::init(0, 1))
+        .build();
+    let alice_group = MlsGroup::new_with_group_id(
+        alice_provider,
+        &alice_signer,
+        &mls_group_create_config,
+        GroupId::from_slice(b"Expired Group"),
+        alice_credential_with_key,
+    )
+    .unwrap();
+
+    let verifiable_group_info = || {
+        alice_group
+            .export_group_info(alice_provider.crypto(), &alice_signer, false)
+            .unwrap()
+            .into_verifiable_group_info()
+            .unwrap()
+    };
+
+    let err = PublicGroup::from_external(
+        public_provider.crypto(),
+        public_provider.storage(),
+        alice_group.export_ratchet_tree().into(),
+        verifiable_group_info(),
+        ProposalStore::new(),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            CreationFromExternalError::LeafNodeValidation(LeafNodeValidationError::Lifetime(
+                LifetimeError::Expired { .. }
+            ))
+        ),
+        "unexpected error: {err:?}"
+    );
+
+    let (public_group, _group_info) = PublicGroup::from_external_with_lifetime_policy(
+        public_provider.crypto(),
+        public_provider.storage(),
+        alice_group.export_ratchet_tree().into(),
+        verifiable_group_info(),
+        ProposalStore::new(),
+        LeafNodeLifetimePolicy::Skip,
+    )
+    .unwrap();
+    assert_eq!(
+        public_group.leaf_node_lifetime_policy(),
+        LeafNodeLifetimePolicy::Skip
+    );
+}
+
+/// A Commit adding a KeyPackage whose lifetime has expired is rejected by a
+/// default [`PublicGroup`] and accepted by one using
+/// [`LeafNodeLifetimePolicy::Skip`] (RFC 9420 §7.3).
+#[openmls_test::openmls_test]
+fn process_commit_lifetime_policy() {
+    // Held for the whole test: the check is disabled only while Alice builds
+    // her commit, and no concurrent test can disable it while this test
+    // expects it to be enforced.
+    let lifetime_check = crate::skip_validation::checks::leaf_node_lifetime::handle();
+
+    let alice_provider = &Provider::default();
+    let bob_provider = &Provider::default();
+    let public_provider = &Provider::default();
+
+    let (alice_credential_with_key, _alice_kpb, alice_signer, _alice_pk) =
+        setup_client("Alice", ciphersuite, alice_provider);
+    let (bob_credential_with_key, _bob_kpb, bob_signer, _bob_pk) =
+        setup_client("Bob", ciphersuite, bob_provider);
+
+    let mls_group_create_config = MlsGroupCreateConfig::builder()
+        .wire_format_policy(PURE_PLAINTEXT_WIRE_FORMAT_POLICY)
+        .ciphersuite(ciphersuite)
+        .build();
+    let mut alice_group = MlsGroup::new_with_group_id(
+        alice_provider,
+        &alice_signer,
+        &mls_group_create_config,
+        GroupId::from_slice(b"Expired Add"),
+        alice_credential_with_key,
+    )
+    .unwrap();
+
+    let new_public_group = |policy| {
+        PublicGroup::from_external_with_lifetime_policy(
+            public_provider.crypto(),
+            public_provider.storage(),
+            alice_group.export_ratchet_tree().into(),
+            alice_group
+                .export_group_info(alice_provider.crypto(), &alice_signer, false)
+                .unwrap()
+                .into_verifiable_group_info()
+                .unwrap(),
+            ProposalStore::new(),
+            policy,
+        )
+        .unwrap()
+        .0
+    };
+    let default_public_group = new_public_group(LeafNodeLifetimePolicy::Verify);
+    let mut skip_public_group = new_public_group(LeafNodeLifetimePolicy::Skip);
+
+    // Bob's KeyPackage expired in 1970.
+    let bob_key_package = KeyPackage::builder()
+        .key_package_lifetime(Lifetime::init(0, 1))
+        .build(
+            ciphersuite,
+            bob_provider,
+            &bob_signer,
+            bob_credential_with_key,
+        )
+        .unwrap();
+
+    lifetime_check.disable_validation();
+    let add = alice_group.add_members(
+        alice_provider,
+        &alice_signer,
+        core::slice::from_ref(bob_key_package.key_package()),
+    );
+    lifetime_check.enable_validation();
+    let (commit, _welcome, _group_info) = add.unwrap();
+    let commit = into_public_message(commit);
+
+    let err = default_public_group
+        .process_message(public_provider.crypto(), commit.clone())
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            PublicProcessMessageError::ValidationError(ValidationError::KeyPackageVerifyError(
+                KeyPackageVerifyError::LifetimeError(LifetimeError::Expired { .. })
+            ))
+        ),
+        "unexpected error: {err:?}"
+    );
+
+    let processed = skip_public_group
+        .process_message(public_provider.crypto(), commit)
+        .unwrap();
+    skip_public_group
+        .merge_commit(public_provider.storage(), extract_staged_commit(processed))
+        .unwrap();
+    assert_eq!(skip_public_group.members().count(), 2);
 }

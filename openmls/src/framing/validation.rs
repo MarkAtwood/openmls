@@ -380,6 +380,7 @@ impl UnverifiedMessage {
         ciphersuite: Ciphersuite,
         crypto: &impl OpenMlsCrypto,
         protocol_version: ProtocolVersion,
+        lifetime_policy: crate::group::LeafNodeLifetimePolicy,
     ) -> Result<VerifiedMessage, ValidationError> {
         let content: AuthenticatedContentIn = self
             .verifiable_content
@@ -387,8 +388,13 @@ impl UnverifiedMessage {
             .map_err(|_| ValidationError::InvalidSignature)?;
         // https://validation.openmls.tech/#valn1302
         // https://validation.openmls.tech/#valn1304
-        let content =
-            content.validate(ciphersuite, crypto, self.sender_context, protocol_version)?;
+        let content = content.validate(
+            ciphersuite,
+            crypto,
+            self.sender_context,
+            protocol_version,
+            lifetime_policy,
+        )?;
         Ok(VerifiedMessage {
             content,
             credential: self.credential,

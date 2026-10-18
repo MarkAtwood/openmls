@@ -290,7 +290,12 @@ impl PublicGroup {
         //  - ValSem010
         //  - ValSem246 (as part of ValSem010)
         //  - https://validation.openmls.tech/#valn1203
-        let verified = unverified_message.verify(self.ciphersuite(), crypto, self.version())?;
+        let verified = unverified_message.verify(
+            self.ciphersuite(),
+            crypto,
+            self.version(),
+            self.leaf_node_lifetime_policy(),
+        )?;
         let content = verified.content;
         let credential = verified.credential;
 
