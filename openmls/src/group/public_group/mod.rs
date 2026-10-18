@@ -83,6 +83,10 @@ pub struct PublicGroup {
     interim_transcript_hash: Vec<u8>,
     // Most recent confirmation tag. Kept here for verification purposes.
     confirmation_tag: ConfirmationTag,
+    // Lifetime policy for received leaf nodes. Not persisted:
+    // [`PublicGroup::load`] restores the default ([`LeafNodeLifetimePolicy::Verify`]).
+    #[cfg_attr(feature = "migration-import", serde(skip))]
+    leaf_node_lifetime_policy: LeafNodeLifetimePolicy,
 }
 
 /// This is a wrapper type, because we can't implement the storage traits on `Vec<u8>`.
@@ -114,6 +118,7 @@ impl PublicGroup {
             group_context,
             interim_transcript_hash,
             confirmation_tag: initial_confirmation_tag,
+            leaf_node_lifetime_policy: LeafNodeLifetimePolicy::default(),
         })
     }
 
@@ -132,13 +137,48 @@ impl PublicGroup {
     where
         StorageProvider: PublicStorageProvider<Error = StorageError>,
     {
-        let (public_group, group_info) = PublicGroup::from_ratchet_tree(
+        Self::from_external_with_lifetime_policy(
             crypto,
+            storage,
             ratchet_tree,
             verifiable_group_info,
             proposal_store,
             LeafNodeLifetimePolicy::Verify,
+        )
+    }
+
+    /// Like [`PublicGroup::from_external`], but with an explicit
+    /// [`LeafNodeLifetimePolicy`] for received leaf nodes.
+    ///
+    /// The policy applies to the leaves of `ratchet_tree` and is kept on the
+    /// returned group for later proposals and commits (KeyPackages in Add
+    /// proposals, Update proposals and UpdatePath leaves). RFC 9420 §7.3 makes
+    /// lifetime verification of received leaf nodes only RECOMMENDED, since a
+    /// leaf may expire between sending and receipt. All other leaf node
+    /// validation is unaffected.
+    ///
+    /// The policy is not persisted; set it again with
+    /// [`PublicGroup::set_leaf_node_lifetime_policy`] after
+    /// [`PublicGroup::load`].
+    pub fn from_external_with_lifetime_policy<StorageProvider, StorageError>(
+        crypto: &impl OpenMlsCrypto,
+        storage: &StorageProvider,
+        ratchet_tree: RatchetTreeIn,
+        verifiable_group_info: VerifiableGroupInfo,
+        proposal_store: ProposalStore,
+        lifetime_policy: LeafNodeLifetimePolicy,
+    ) -> Result<(Self, GroupInfo), CreationFromExternalError<StorageError>>
+    where
+        StorageProvider: PublicStorageProvider<Error = StorageError>,
+    {
+        let (mut public_group, group_info) = PublicGroup::from_ratchet_tree(
+            crypto,
+            ratchet_tree,
+            verifiable_group_info,
+            proposal_store,
+            lifetime_policy,
         )?;
+        public_group.leaf_node_lifetime_policy = lifetime_policy;
 
         public_group
             .store(storage)
@@ -297,6 +337,7 @@ impl PublicGroup {
             interim_transcript_hash,
             confirmation_tag: group_info.confirmation_tag().clone(),
             proposal_store,
+            leaf_node_lifetime_policy: LeafNodeLifetimePolicy::default(),
         };
 
         // Fully check that the leaf nodes in the ratchet tree are valid
@@ -459,6 +500,18 @@ impl PublicGroup {
         &self.group_context
     }
 
+    /// Get the [`LeafNodeLifetimePolicy`] applied to received leaf nodes.
+    pub fn leaf_node_lifetime_policy(&self) -> LeafNodeLifetimePolicy {
+        self.leaf_node_lifetime_policy
+    }
+
+    /// Set the [`LeafNodeLifetimePolicy`] applied to leaf nodes in proposals
+    /// and commits processed from now on. See
+    /// [`PublicGroup::from_external_with_lifetime_policy`].
+    pub fn set_leaf_node_lifetime_policy(&mut self, lifetime_policy: LeafNodeLifetimePolicy) {
+        self.leaf_node_lifetime_policy = lifetime_policy;
+    }
+
     /// Get the required capabilities.
     pub fn required_capabilities(&self) -> Option<&RequiredCapabilitiesExtension> {
         self.group_context.required_capabilities()
@@ -551,6 +604,7 @@ impl PublicGroup {
                 group_context: group_context?,
                 interim_transcript_hash: interim_transcript_hash?.0,
                 confirmation_tag: confirmation_tag?,
+                leaf_node_lifetime_policy: LeafNodeLifetimePolicy::default(),
             })
         };
 

@@ -50,6 +50,7 @@ impl AuthenticatedContentIn {
         crypto: &impl OpenMlsCrypto,
         sender_context: Option<SenderContext>,
         protocol_version: ProtocolVersion,
+        lifetime_policy: crate::group::LeafNodeLifetimePolicy,
     ) -> Result<AuthenticatedContent, ValidationError> {
         Ok(AuthenticatedContent {
             wire_format: self.wire_format,
@@ -58,6 +59,7 @@ impl AuthenticatedContentIn {
                 crypto,
                 sender_context,
                 protocol_version,
+                lifetime_policy,
             )?,
             auth: self.auth,
         })

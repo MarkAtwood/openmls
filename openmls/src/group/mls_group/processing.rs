@@ -839,8 +839,12 @@ impl MlsGroup {
         //  - ValSem246 (as part of ValSem010)
         //  - https://validation.openmls.tech/#valn1302
         //  - https://validation.openmls.tech/#valn1304
-        let verified =
-            unverified_message.verify(self.ciphersuite(), provider.crypto(), self.version())?;
+        let verified = unverified_message.verify(
+            self.ciphersuite(),
+            provider.crypto(),
+            self.version(),
+            self.public_group.leaf_node_lifetime_policy(),
+        )?;
 
         #[cfg_attr(not(feature = "extensions-draft"), allow(unused_mut))]
         let mut processed = match verified.content.sender() {
