@@ -4406,3 +4406,114 @@ fn commit_with_new_signer_signs_group_info_with_new_signer() {
     )
     .expect("Charlie failed to track the group from the exported GroupInfo");
 }
+
+/// RFC 9420 §7.3 makes lifetime verification only RECOMMENDED for received
+/// leaf nodes. A member whose [`MlsGroup`] uses [`LeafNodeLifetimePolicy::Skip`]
+/// must process a Commit adding a KeyPackage whose lifetime has expired, while
+/// the default policy keeps rejecting it.
+#[openmls_test]
+fn mls_group_process_commit_lifetime_policy() {
+    // Held for the whole test: the check is disabled only while Alice builds
+    // her commit, and no concurrent test can disable it while this test
+    // expects it to be enforced.
+    let lifetime_check = crate::skip_validation::checks::leaf_node_lifetime::handle();
+
+    let alice_provider = &Provider::default();
+    let bob_provider = &Provider::default();
+    let charlie_provider = &Provider::default();
+
+    let (alice_credential_with_key, _alice_kpb, alice_signer, _alice_pk) =
+        setup_client("Alice", ciphersuite, alice_provider);
+    let (_bob_credential_with_key, bob_kpb, _bob_signer, _bob_pk) =
+        setup_client("Bob", ciphersuite, bob_provider);
+    let (charlie_credential_with_key, _charlie_kpb, charlie_signer, _charlie_pk) =
+        setup_client("Charlie", ciphersuite, charlie_provider);
+
+    let mls_group_create_config = MlsGroupCreateConfig::builder()
+        .wire_format_policy(PURE_PLAINTEXT_WIRE_FORMAT_POLICY)
+        .ciphersuite(ciphersuite)
+        .build();
+    let mut alice_group = MlsGroup::new_with_group_id(
+        alice_provider,
+        &alice_signer,
+        &mls_group_create_config,
+        GroupId::from_slice(b"Expired Add"),
+        alice_credential_with_key,
+    )
+    .unwrap();
+
+    let (_commit, welcome, _group_info) = alice_group
+        .add_members(
+            alice_provider,
+            &alice_signer,
+            from_ref(bob_kpb.key_package()),
+        )
+        .unwrap();
+    alice_group.merge_pending_commit(alice_provider).unwrap();
+    let welcome: MlsMessageIn = welcome.into();
+    let mut bob_group = StagedWelcome::new_from_welcome(
+        bob_provider,
+        mls_group_create_config.join_config(),
+        welcome.into_welcome().unwrap(),
+        Some(alice_group.export_ratchet_tree().into()),
+    )
+    .unwrap()
+    .into_group(bob_provider)
+    .unwrap();
+    assert_eq!(
+        bob_group.public_group().leaf_node_lifetime_policy(),
+        LeafNodeLifetimePolicy::Verify
+    );
+
+    // Charlie's KeyPackage expired in 1970.
+    let charlie_key_package = KeyPackage::builder()
+        .key_package_lifetime(Lifetime::init(0, 1))
+        .build(
+            ciphersuite,
+            charlie_provider,
+            &charlie_signer,
+            charlie_credential_with_key,
+        )
+        .unwrap();
+
+    lifetime_check.disable_validation();
+    let add = alice_group.add_members(
+        alice_provider,
+        &alice_signer,
+        from_ref(charlie_key_package.key_package()),
+    );
+    lifetime_check.enable_validation();
+    let (commit, _welcome, _group_info) = add.unwrap();
+    let commit: MlsMessageIn = commit.into();
+    let commit = commit.into_protocol_message().unwrap();
+
+    let err = bob_group
+        .process_message(bob_provider, commit.clone())
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            ProcessMessageError::ValidationError(ValidationError::KeyPackageVerifyError(
+                crate::key_packages::errors::KeyPackageVerifyError::LifetimeError(
+                    crate::treesync::errors::LifetimeError::Expired { .. }
+                )
+            ))
+        ),
+        "unexpected error: {err:?}"
+    );
+
+    bob_group.set_leaf_node_lifetime_policy(LeafNodeLifetimePolicy::Skip);
+    assert_eq!(
+        bob_group.public_group().leaf_node_lifetime_policy(),
+        LeafNodeLifetimePolicy::Skip
+    );
+    let processed = bob_group.process_message(bob_provider, commit).unwrap();
+    let ProcessedMessageContent::StagedCommitMessage(staged_commit) = processed.into_content()
+    else {
+        panic!("expected a staged commit");
+    };
+    bob_group
+        .merge_staged_commit(bob_provider, *staged_commit)
+        .unwrap();
+    assert_eq!(bob_group.members().count(), 3);
+}

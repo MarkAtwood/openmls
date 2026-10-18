@@ -21,9 +21,10 @@ use crate::{
     framing::{mls_auth_content::AuthenticatedContent, *},
     group::{
         CreateGroupContextExtProposalError, DeletePastEpochSecretsError, Extension, ExtensionType,
-        ExternalPubExtension, GroupContext, GroupEpoch, GroupId, MlsGroupJoinConfig,
-        MlsGroupStateError, OutgoingWireFormatPolicy, PublicGroup, RatchetTreeExtension,
-        RequiredCapabilitiesExtension, SetPastEpochDeletionPolicyError, StagedCommit,
+        ExternalPubExtension, GroupContext, GroupEpoch, GroupId, LeafNodeLifetimePolicy,
+        MlsGroupJoinConfig, MlsGroupStateError, OutgoingWireFormatPolicy, PublicGroup,
+        RatchetTreeExtension, RequiredCapabilitiesExtension, SetPastEpochDeletionPolicyError,
+        StagedCommit,
     },
     key_packages::KeyPackageBundle,
     messages::{
@@ -926,6 +927,18 @@ impl MlsGroup {
     /// Returns a reference to the public group.
     pub fn public_group(&self) -> &PublicGroup {
         &self.public_group
+    }
+
+    /// Set the [`LeafNodeLifetimePolicy`] applied to received leaf nodes in
+    /// proposals and commits processed from now on.
+    ///
+    /// RFC 9420 §7.3 makes lifetime verification of received leaf nodes only
+    /// RECOMMENDED, since a leaf may expire between sending and receipt. Leaf
+    /// nodes this client sends are unaffected. The policy is not persisted;
+    /// [`MlsGroup::load`] restores [`LeafNodeLifetimePolicy::Verify`]. Read it
+    /// with [`PublicGroup::leaf_node_lifetime_policy`].
+    pub fn set_leaf_node_lifetime_policy(&mut self, policy: LeafNodeLifetimePolicy) {
+        self.public_group.set_leaf_node_lifetime_policy(policy);
     }
 }
 
