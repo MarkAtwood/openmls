@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Fork (MarkAtwood/openmls mimid-0.9.2)
+
+- [#2284](https://github.com/openmls/openmls/issues/2284): `ComponentType::from` now maps component IDs 0x8A8A, 0x9A9A, 0xAAAA, 0xBABA, 0xCACA, 0xDADA and 0xEAEA to `ComponentType::Private`. They are in the private-use range of the MLS Component Types registry, which has only the GREASE values 0x0A0A to 0x7A7A. The variants `ComponentType::Grease8A8A` to `ComponentType::GreaseEAEA` are removed. (Cherry-picked from upstream #2285.)
+
 ## 0.9.2 (2026-10-22)
 
 ### Fixed
