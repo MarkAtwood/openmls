@@ -20,6 +20,12 @@ use crate::{
 use openmls_traits::signatures::Signer;
 
 use super::proposals::{GroupContextExtensionProposal, RemoveProposal};
+#[cfg(feature = "extensions-draft")]
+use crate::{
+    component::ComponentId,
+    group::mls_group::errors::ProposalError,
+    messages::proposals::{AppDataUpdateOperation, AppDataUpdateProposal},
+};
 
 /// External Add Proposal where sender is [NewMemberProposal](crate::prelude::Sender::NewMemberProposal). A client
 /// outside the group can request joining the group. This proposal should then be committed by a
@@ -147,5 +153,41 @@ impl ExternalProposal {
         .map(PublicMessage::from)
         .map(MlsMessageOut::from)
         .map_err(ProposeAddMemberError::from)
+    }
+
+    /// Creates an external AppDataUpdate proposal. For delivery services requesting to update the
+    /// application data of a component in the group context.
+    /// This proposal will have to be committed later by a group member.
+    ///
+    /// # Arguments
+    /// * `component_id` - the component whose data is updated or removed
+    /// * `operation` - the update or remove operation
+    /// * `group_id` - unique group identifier of the group
+    /// * `epoch` - group's epoch
+    /// * `signer` - of the sender to sign the message
+    /// * `sender_index` - index of the sender of the proposal (in the [crate::extensions::ExternalSendersExtension] array
+    ///   from the Group Context)
+    #[cfg(feature = "extensions-draft")]
+    pub fn new_app_data_update<Provider: OpenMlsProvider>(
+        component_id: ComponentId,
+        operation: AppDataUpdateOperation,
+        group_id: GroupId,
+        epoch: GroupEpoch,
+        signer: &impl Signer,
+        sender_index: SenderExtensionIndex,
+    ) -> Result<MlsMessageOut, ProposalError<Provider::StorageError>> {
+        AuthenticatedContent::new_external_proposal(
+            Proposal::AppDataUpdate(Box::new(AppDataUpdateProposal::new(
+                component_id,
+                operation,
+            ))),
+            group_id,
+            epoch,
+            signer,
+            sender_index,
+        )
+        .map(PublicMessage::from)
+        .map(MlsMessageOut::from)
+        .map_err(ProposalError::from)
     }
 }
