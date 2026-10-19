@@ -167,6 +167,8 @@ impl ExternalProposal {
     /// * `signer` - of the sender to sign the message
     /// * `sender_index` - index of the sender of the proposal (in the [crate::extensions::ExternalSendersExtension] array
     ///   from the Group Context)
+    /// * `authenticated_data` - the `authenticated_data` of the message; a SafeAAD struct if the
+    ///   group requires one (draft-ietf-mls-extensions-10 §4.9)
     #[cfg(feature = "extensions-draft")]
     pub fn new_app_data_update<Provider: OpenMlsProvider>(
         component_id: ComponentId,
@@ -175,8 +177,9 @@ impl ExternalProposal {
         epoch: GroupEpoch,
         signer: &impl Signer,
         sender_index: SenderExtensionIndex,
+        authenticated_data: Vec<u8>,
     ) -> Result<MlsMessageOut, ProposalError<Provider::StorageError>> {
-        AuthenticatedContent::new_external_proposal(
+        AuthenticatedContent::new_external_proposal_with_aad(
             Proposal::AppDataUpdate(Box::new(AppDataUpdateProposal::new(
                 component_id,
                 operation,
@@ -185,6 +188,7 @@ impl ExternalProposal {
             epoch,
             signer,
             sender_index,
+            authenticated_data,
         )
         .map(PublicMessage::from)
         .map(MlsMessageOut::from)
