@@ -14,7 +14,7 @@ use super::*;
 
 #[cfg(feature = "extensions-draft")]
 use crate::{
-    extensions::{AppDataDictionaryExtension, Extension},
+    extensions::{AppDataDictionaryExtension, Extension, ExtensionType},
     prelude::processing::AppDataUpdates,
 };
 
@@ -289,11 +289,30 @@ impl PublicGroupDiff<'_> {
         let extensions_to_update = updated_group_context_extensions
             .get_or_insert_with(|| self.group_context.extensions().clone());
 
-        // update the dictionary extension
-        extensions_to_update
-            .add_or_replace(Extension::AppDataDictionary(
-                AppDataDictionaryExtension::new(dictionary),
-            ))
+        // update the dictionary extension, keeping its position in the list.
+        //
+        // From the draft (Section 4.7): if no app_data_dictionary extension is
+        // present in the GroupContext, add one to the end of the extensions
+        // list; otherwise set the data of the entry.
+        let dictionary = Extension::AppDataDictionary(AppDataDictionaryExtension::new(dictionary));
+        let updated = if extensions_to_update.contains(ExtensionType::AppDataDictionary) {
+            Extensions::from_vec(
+                extensions_to_update
+                    .iter()
+                    .map(|extension| {
+                        if extension.extension_type() == ExtensionType::AppDataDictionary {
+                            dictionary.clone()
+                        } else {
+                            extension.clone()
+                        }
+                    })
+                    .collect(),
+            )
+        } else {
+            let mut extensions = extensions_to_update.clone();
+            extensions.add(dictionary).map(|()| extensions)
+        };
+        *extensions_to_update = updated
             .map_err(|_| LibraryError::custom("Failed to update AppDataDictionary extension"))?;
 
         Ok(())
