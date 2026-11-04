@@ -28,7 +28,7 @@ After receiving a `MlsMessageIn` from the delivery service, the first step is to
 {{#include ../../../openmls/tests/book_code_discard_welcome.rs:not_join_group_welcome}}
 ```
 
-The next step is to process the `Welcome`. This removes the consumed `KeyPackage` from the `StorageProvider`, unless it is a last resort `KeyPackage`.
+The next step is to process the `Welcome`. This does not yet remove the consumed `KeyPackage` from the `StorageProvider`: that happens only when the `StagedWelcome` is turned into an `MlsGroup`, and never for a last resort `KeyPackage`. A discarded `Welcome` leaves the `KeyPackage` in storage.
 
 ```rust,no_run,noplayground
 {{#include ../../../openmls/tests/book_code_discard_welcome.rs:not_join_group_processed_welcome}}

@@ -138,6 +138,9 @@ impl ProcessedWelcome {
     ///
     /// This does not require a ratchet tree yet.
     ///
+    /// This does not consume the [`KeyPackage`] the [`Welcome`] is encrypted
+    /// to. It stays in storage until [`StagedWelcome::into_group`] succeeds.
+    ///
     /// [`Welcome`]: crate::messages::Welcome
     pub fn new_from_welcome<Provider: OpenMlsProvider>(
         provider: &Provider,
@@ -145,8 +148,6 @@ impl ProcessedWelcome {
         welcome: Welcome,
     ) -> Result<Self, WelcomeError<Provider::StorageError>> {
         let ciphersuite = welcome.ciphersuite();
-        // Check this before touching any stored key material: `keys_for_welcome`
-        // consumes a matching (non-last-resort) key package.
         provider
             .crypto()
             .supports(ciphersuite)
@@ -530,8 +531,9 @@ impl StagedWelcome {
     /// Creates a new staged welcome from a [`Welcome`] message. Returns an error
     /// ([`WelcomeError::NoMatchingKeyPackage`]) if no [`KeyPackage`]
     /// can be found.
-    /// Note: calling this function will consume the key material for decrypting the [`Welcome`]
-    /// message, even if the caller does not turn the [`StagedWelcome`] into an [`MlsGroup`].
+    ///
+    /// This does not consume the [`KeyPackage`] the [`Welcome`] is encrypted
+    /// to. It stays in storage until [`StagedWelcome::into_group`] succeeds.
     ///
     /// [`Welcome`]: crate::messages::Welcome
     pub fn new_from_welcome<Provider: OpenMlsProvider>(
@@ -607,6 +609,12 @@ impl StagedWelcome {
     }
 
     /// Consumes the [`StagedWelcome`] and returns the respective [`MlsGroup`].
+    ///
+    /// Once the group is stored, this deletes the [`KeyPackage`] the
+    /// [`Welcome`] was encrypted to from storage, unless it is a last-resort
+    /// [`KeyPackage`]. If storing the group fails, the [`KeyPackage`] stays.
+    ///
+    /// [`Welcome`]: crate::messages::Welcome
     pub fn into_group<Provider: OpenMlsProvider>(
         self,
         provider: &Provider,
@@ -651,6 +659,33 @@ impl StagedWelcome {
         mls_group
             .store(provider.storage())
             .map_err(WelcomeError::StorageError)?;
+
+        // Consume the key material only now that the group is stored, so that
+        // a Welcome that is rejected or dropped before this point leaves it
+        // available.
+        match &self.key_material {
+            WelcomeKeyMaterial::KeyPackage(key_package_bundle) => {
+                if !key_package_bundle.key_package().last_resort() {
+                    provider
+                        .storage()
+                        .delete_key_package(
+                            &key_package_bundle
+                                .key_package()
+                                .hash_ref(provider.crypto())?,
+                        )
+                        .map_err(WelcomeError::StorageError)?;
+                } else {
+                    log::debug!("Key package has last resort extension, not deleting");
+                }
+            }
+            #[cfg(feature = "virtual-clients-draft")]
+            WelcomeKeyMaterial::VirtualClient(material) => {
+                provider
+                    .storage()
+                    .delete_retained_key_package_material(&material.key_package_ref)
+                    .map_err(WelcomeError::StorageError)?;
+            }
+        }
 
         Ok(mls_group)
     }
@@ -703,16 +738,6 @@ fn keys_for_welcome<Provider: OpenMlsProvider>(
             .map_err(WelcomeError::StorageError)?
         {
             let key_package_bundle: KeyPackageBundle = key_package_bundle;
-            if !key_package_bundle.key_package().last_resort() {
-                provider
-                    .storage()
-                    .delete_key_package(
-                        &key_package_bundle.key_package.hash_ref(provider.crypto())?,
-                    )
-                    .map_err(WelcomeError::StorageError)?;
-            } else {
-                log::debug!("Key package has last resort extension, not deleting");
-            }
             return Ok((
                 resumption_psk_store,
                 WelcomeKeyMaterial::KeyPackage(Box::new(key_package_bundle)),
@@ -736,11 +761,11 @@ fn keys_for_welcome<Provider: OpenMlsProvider>(
 /// caller can keep scanning the welcome's encrypted group secrets.
 ///
 /// On a match this reconstructs the per-KeyPackage seed pinned in the retained
-/// material at upload-processing time, deletes the consumed material, and
-/// derives the init and leaf-encryption keypairs from the seed under the
+/// material at upload-processing time and derives the init and leaf-encryption keypairs from the seed under the
 /// Welcome's ciphersuite. It does not touch the operation tree: the batch
 /// generation was already consumed once when the upload was processed, and the
-/// seed is enough to reproduce the keys.
+/// seed is enough to reproduce the keys. The material is deleted by
+/// [`StagedWelcome::into_group`], like a non-last-resort KeyPackage.
 ///
 /// [`RetainedKeyPackageMaterial`]: crate::components::vc_derivation_info::RetainedKeyPackageMaterial
 #[cfg(feature = "virtual-clients-draft")]
@@ -752,9 +777,7 @@ fn vc_welcome_material<Provider: OpenMlsProvider>(
     Option<crate::components::vc_derivation_info::VcWelcomeMaterial>,
     WelcomeError<<Provider as OpenMlsProvider>::StorageError>,
 > {
-    use crate::components::vc_derivation_info::{
-        RetainedKeyPackageMaterial, VcWelcomeMaterial, VirtualClientsError,
-    };
+    use crate::components::vc_derivation_info::{RetainedKeyPackageMaterial, VcWelcomeMaterial};
 
     let storage = provider.storage();
     let Some(material) = storage
@@ -769,15 +792,6 @@ fn vc_welcome_material<Provider: OpenMlsProvider>(
     }
 
     let crypto = provider.crypto();
-    // The material is consumed once, mirroring the non-last-resort
-    // `delete_key_package` on the bundle path.
-    storage
-        .delete_retained_key_package_material(hash_ref)
-        .map_err(|e| {
-            log::error!("vc: delete retained key package material in welcome failed: {e:?}");
-            VirtualClientsError::StorageError
-        })?;
-
     // The seed is imported into the KeyPackage's ciphersuite at
     // upload-processing time. The init and leaf-encryption keys are derived
     // from it under the KeyPackage's own (the welcome's) ciphersuite.
