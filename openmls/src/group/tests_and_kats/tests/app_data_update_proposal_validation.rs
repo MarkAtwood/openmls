@@ -306,6 +306,53 @@ fn test_group_context_update_dictionary_without_app_data_update() {
 }
 
 /// Commit creation:
+/// draft-ietf-mls-extensions-11 §4.7: a GroupContextExtensions proposal may not add the
+/// AppDataDictionary even in a group that does not require AppDataUpdate (-10 allowed it there).
+#[openmls_test]
+fn test_group_context_update_dictionary_when_app_data_update_not_required() {
+    let alice_party = CorePartyState::<Provider>::new("alice");
+    let bob_party = CorePartyState::<Provider>::new("bob");
+
+    let mut group_state = setup(&alice_party, &bob_party, ciphersuite, false);
+
+    let [alice] = group_state.members_mut(&["alice"]);
+
+    // Required capabilities that make the dictionary extension known but do not require the
+    // AppDataUpdate proposal type.
+    let required_capabilities_extension =
+        Extension::RequiredCapabilities(RequiredCapabilitiesExtension::new(
+            &[ExtensionType::AppDataDictionary],
+            &[],
+            &[],
+        ));
+    let dictionary_extension = Extension::AppDataDictionary(AppDataDictionaryExtension::default());
+
+    alice
+        .group
+        .propose_group_context_extensions(
+            &alice_party.provider,
+            Extensions::from_vec(vec![required_capabilities_extension, dictionary_extension])
+                .unwrap(),
+            &alice.party.signer,
+        )
+        .unwrap();
+
+    let err = alice
+        .group
+        .commit_to_pending_proposals(&alice_party.provider, &alice.party.signer)
+        .unwrap_err();
+
+    assert_eq!(
+        err,
+        CommitToPendingProposalsError::CreateCommitError(
+            CreateCommitError::AppDataUpdateValidationError(
+                AppDataUpdateValidationError::CannotUpdateDictionaryDirectly
+            )
+        )
+    );
+}
+
+/// Commit creation:
 /// Test the case where a GroupContextExtensionProposal updates the AppDataDictionary after
 /// removing AppDataUpdate from the required capabilities.
 #[openmls_test]
