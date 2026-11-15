@@ -126,6 +126,31 @@ impl ExternalProposal {
         .map_err(ProposeRemoveMemberError::from)
     }
 
+    /// Creates an external Remove proposal with the given `authenticated_data`, as
+    /// [`Self::new_remove`] does with none. A group whose GroupContext requires Safe AAD
+    /// (draft-ietf-mls-extensions-10 §4.9) needs `authenticated_data` to be a SafeAAD struct.
+    /// This proposal will have to be committed later by a group member.
+    pub fn new_remove_with_aad<Provider: OpenMlsProvider>(
+        removed: LeafNodeIndex,
+        group_id: GroupId,
+        epoch: GroupEpoch,
+        signer: &impl Signer,
+        sender_index: SenderExtensionIndex,
+        authenticated_data: Vec<u8>,
+    ) -> Result<MlsMessageOut, ProposeRemoveMemberError<Provider::StorageError>> {
+        AuthenticatedContent::new_external_proposal_with_aad(
+            Proposal::remove(RemoveProposal { removed }),
+            group_id,
+            epoch,
+            signer,
+            sender_index,
+            authenticated_data,
+        )
+        .map(PublicMessage::from)
+        .map(MlsMessageOut::from)
+        .map_err(ProposeRemoveMemberError::from)
+    }
+
     /// Creates an external Add proposal. For delivery services requesting to add a client.
     /// This proposal will have to be committed later by a group member.
     ///
