@@ -126,7 +126,15 @@ impl Signature {
     pub(crate) fn modify(&mut self, value: &[u8]) {
         self.value = value.to_vec().into();
     }
-    pub(crate) fn as_slice(&self) -> &[u8] {
+
+    /// Returns the bytes of the signature.
+    ///
+    /// Public so that a consumer of
+    /// [`FramedContentAuthData::signature`](crate::framing::FramedContentAuthData::signature)
+    /// can verify it. Without this there is no way to read a signature
+    /// a caller has been handed, short of serializing it and stripping
+    /// the length prefix.
+    pub fn as_slice(&self) -> &[u8] {
         self.value.as_slice()
     }
 }
