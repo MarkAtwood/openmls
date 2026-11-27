@@ -319,12 +319,9 @@ fn test_group_context_update_dictionary_when_app_data_update_not_required() {
 
     // Required capabilities that make the dictionary extension known but do not require the
     // AppDataUpdate proposal type.
-    let required_capabilities_extension =
-        Extension::RequiredCapabilities(RequiredCapabilitiesExtension::new(
-            &[ExtensionType::AppDataDictionary],
-            &[],
-            &[],
-        ));
+    let required_capabilities_extension = Extension::RequiredCapabilities(
+        RequiredCapabilitiesExtension::new(&[ExtensionType::AppDataDictionary], &[], &[]),
+    );
     let dictionary_extension = Extension::AppDataDictionary(AppDataDictionaryExtension::default());
 
     alice
