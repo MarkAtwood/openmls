@@ -120,13 +120,7 @@ pub struct OpenMlsSignaturePublicKey {
     pub(in crate::ciphersuite) value: VLBytes,
 }
 
-#[cfg(any(test, feature = "test-utils"))]
 impl Signature {
-    #[cfg(test)]
-    pub(crate) fn modify(&mut self, value: &[u8]) {
-        self.value = value.to_vec().into();
-    }
-
     /// Returns the bytes of the signature.
     ///
     /// Public so that a consumer of
@@ -136,6 +130,14 @@ impl Signature {
     /// the length prefix.
     pub fn as_slice(&self) -> &[u8] {
         self.value.as_slice()
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl Signature {
+    #[cfg(test)]
+    pub(crate) fn modify(&mut self, value: &[u8]) {
+        self.value = value.to_vec().into();
     }
 }
 
